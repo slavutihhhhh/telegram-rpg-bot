@@ -6,11 +6,21 @@ from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
 TOKEN = os.getenv("BOT_TOKEN")
+if not TOKEN:
+    raise ValueError("BOT_TOKEN не знайдено")
+
 SAVE_FILE = "players.json"
 UPDATE_FILE = "latest_update.json"
 
-GROUP_ID = -5292706881
-ADMINS = [6449855887]
+PORT = int(os.getenv("PORT", "10000"))
+RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL", "").rstrip("/")
+
+GROUP_ID = int(os.getenv("GROUP_ID", "-5292706881"))
+ADMINS = [
+    int(x.strip())
+    for x in os.getenv("ADMINS", "6449855887").split(",")
+    if x.strip()
+]
 
 START_IMAGE = "images/last_hero.jpg.png"
 
@@ -29,10 +39,6 @@ ARMORS = {
     "Шкура вовка": 2,
     "Шкіряна броня": 4,
     "Залізний щит": 5
-}
-
-HEAL_ITEMS = {
-    "Зілля лікування": 30
 }
 
 ITEM_PRICES = {
@@ -201,9 +207,8 @@ def load_players():
 
 
 def save_latest_update(text: str):
-    data = {"text": text}
     with open(UPDATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+        json.dump({"text": text}, f, ensure_ascii=False, indent=2)
 
 
 def load_latest_update():
@@ -822,7 +827,20 @@ def main():
     )
 
     print("RPG Бот запущений...")
-    app.run_polling()
+
+    if RENDER_EXTERNAL_URL:
+        webhook_url = f"{RENDER_EXTERNAL_URL}/{TOKEN}"
+        print(f"Webhook mode: {webhook_url}")
+        app.run_webhook(
+            listen="0.0.0.0",
+            port=PORT,
+            url_path=TOKEN,
+            webhook_url=webhook_url,
+            drop_pending_updates=True,
+        )
+    else:
+        print("Polling mode")
+        app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
