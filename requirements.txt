@@ -1,2 +1,1 @@
-python-telegram-bot==21.10
-telegram
+python-telegram-bot[webhooks]==21.10
