@@ -1,0 +1,31 @@
+{
+  "6449855887": {
+    "hp": 180,
+    "max_hp": 180,
+    "xp": 107,
+    "level": 5,
+    "gold": 26,
+    "enemy": {
+      "name": "Піщаний скелет",
+      "hp": 60,
+      "damage": [
+        10,
+        15
+      ],
+      "image": "images/skeleton.jpg.png",
+      "location_key": "desert"
+    },
+    "inventory": [
+      "Шкура вовка",
+      "Шкура вовка",
+      "Шкура вовка",
+      "Залізний меч",
+      "Темний уламок"
+    ],
+    "equipment": {
+      "weapon": "Залізний меч",
+      "armor": "Шкура вовка"
+    },
+    "current_location": "desert"
+  }
+}
