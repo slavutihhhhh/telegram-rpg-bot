@@ -6,7 +6,7 @@ import random
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
-TOKEN = 8565554508:AAFqFViAgcFqPrj59IOwQUXahHG4AyAu8YA
+TOKEN = "8565554508:AAFqFViAgcFqPrj59IOwQUXahHG4AyAu8YA"
 
 if not TOKEN:
     raise ValueError("BOT_TOKEN не знайдено")
