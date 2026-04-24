@@ -690,8 +690,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "⬅️ Назад":
         await update.message.reply_text("↩️ Повернення в меню.", reply_markup=get_main_menu())
 
-    elif text == "⚔️ Бій":
-        if player["enemy"]:
-            enemy = player["enemy"]
-            await update.message.reply_text(
-           
+elif text == "⚔️ Бій":
+    if player["enemy"]:
+        enemy = player["enemy"]
+        await update.message.reply_text(
+            f"⚔️ Ти вже в бою з {enemy['name']}!",
+            reply_markup=battle_menu
+        )
+        return
+
+    location = get_current_location_data(player)
+    enemy = random.choice(location["enemies"]).copy()
+
+    player["enemy"] = enemy
+    save_players()
+
+    await send_enemy_intro(update, enemy)
