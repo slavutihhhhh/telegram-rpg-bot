@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import json
 import os
 import random
@@ -7,7 +8,6 @@ from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
 TOKEN = "8565554508:AAFqFViAgcFqPrj59IOwQUXahHG4AyAu8YA"
-
 if not TOKEN:
     raise ValueError("BOT_TOKEN не знайдено")
 
@@ -15,49 +15,132 @@ SAVE_FILE = "players.json"
 UPDATE_FILE = "latest_update.json"
 
 GROUP_ID = int(os.getenv("GROUP_ID", "-5292706881"))
-ADMINS = [6449855887]
+ADMINS = [
+    int(x.strip())
+    for x in os.getenv("ADMINS", "6449855887").split(",")
+    if x.strip()
+]
 
 START_IMAGE = "images/last_hero.jpg.png"
 
 players = {}
 
-WEAPONS = {
-    "Іржавий кинджал": 3,
-    "Кістяний меч": 5,
-    "Мисливський спис": 7,
-    "Залізний меч": 9
+RARITY_EMOJI = {
+    "common": "⚪",
+    "uncommon": "🟢",
+    "rare": "🔵",
+    "epic": "🟣",
+    "legendary": "🟠"
 }
 
-ARMORS = {
-    "Шкіряний шматок": 1,
-    "Старий щит": 2,
-    "Шкура вовка": 2,
-    "Шкіряна броня": 4,
-    "Залізний щит": 5
+RARITY_NAME = {
+    "common": "звичайний",
+    "uncommon": "незвичайний",
+    "rare": "рідкісний",
+    "epic": "епічний",
+    "legendary": "легендарний"
 }
 
-ITEM_PRICES = {
-    "Зілля лікування": 15,
-    "Іржавий кинджал": 20,
-    "Кістяний меч": 35,
-    "Мисливський спис": 50,
-    "Залізний меч": 70,
-    "Шкіряний шматок": 10,
-    "Старий щит": 25,
-    "Шкура вовка": 18,
-    "Шкіряна броня": 45,
-    "Залізний щит": 60,
-    "Ікло вовка": 8,
-    "М'ясо вовка": 6,
-    "Кіготь хижака": 14,
-    "Темний уламок": 18,
-    "Пустельний зуб": 16,
-    "Пісочна шкура": 20
+ITEMS = {
+    "Зілля лікування": {
+        "type": "consumable",
+        "rarity": "common",
+        "price": 15,
+        "heal": 40
+    },
+
+    "Іржавий кинджал": {
+        "type": "weapon",
+        "rarity": "common",
+        "price": 20,
+        "damage": 3
+    },
+    "Кістяний меч": {
+        "type": "weapon",
+        "rarity": "uncommon",
+        "price": 35,
+        "damage": 5
+    },
+    "Мисливський спис": {
+        "type": "weapon",
+        "rarity": "rare",
+        "price": 50,
+        "damage": 7
+    },
+    "Залізний меч": {
+        "type": "weapon",
+        "rarity": "rare",
+        "price": 70,
+        "damage": 9
+    },
+
+    "Шкіряний шматок": {
+        "type": "armor",
+        "rarity": "common",
+        "price": 10,
+        "defense": 1
+    },
+    "Старий щит": {
+        "type": "armor",
+        "rarity": "common",
+        "price": 25,
+        "defense": 2
+    },
+    "Шкура вовка": {
+        "type": "armor",
+        "rarity": "uncommon",
+        "price": 18,
+        "defense": 2
+    },
+    "Шкіряна броня": {
+        "type": "armor",
+        "rarity": "rare",
+        "price": 45,
+        "defense": 4
+    },
+    "Залізний щит": {
+        "type": "armor",
+        "rarity": "rare",
+        "price": 60,
+        "defense": 5
+    },
+
+    "Ікло вовка": {
+        "type": "material",
+        "rarity": "common",
+        "price": 8
+    },
+    "М'ясо вовка": {
+        "type": "material",
+        "rarity": "common",
+        "price": 6
+    },
+    "Кіготь хижака": {
+        "type": "material",
+        "rarity": "uncommon",
+        "price": 14
+    },
+    "Темний уламок": {
+        "type": "material",
+        "rarity": "rare",
+        "price": 18
+    },
+    "Пустельний зуб": {
+        "type": "material",
+        "rarity": "uncommon",
+        "price": 16
+    },
+    "Пісочна шкура": {
+        "type": "material",
+        "rarity": "rare",
+        "price": 20
+    }
 }
 
 LOCATIONS = {
     "forest": {
         "name": "🌲 Ліс",
+        "level_range": "1-5",
         "enemies": [
             {
                 "name": "Гоблін",
@@ -79,11 +162,19 @@ LOCATIONS = {
                 "damage": (7, 11),
                 "image": "images/wolf.jpg.png",
                 "drops": ["Ікло вовка", "Шкура вовка", "М'ясо вовка"]
+            },
+            {
+                "name": "Лісовий хижак",
+                "hp": 45,
+                "damage": (8, 13),
+                "image": "images/wolf.jpg.png",
+                "drops": ["Кіготь хижака", "Шкура вовка", "Зілля лікування"]
             }
         ]
     },
     "desert": {
         "name": "🏜️ Пустеля",
+        "level_range": "4-10",
         "enemies": [
             {
                 "name": "Пустельний розбійник",
@@ -111,6 +202,80 @@ LOCATIONS = {
 }
 
 
+def make_item(name):
+    base = ITEMS.get(name)
+
+    if not base:
+        base = {
+            "type": "material",
+            "rarity": "common",
+            "price": 5
+        }
+
+    item = {
+        "name": name,
+        "type": base.get("type", "material"),
+        "rarity": base.get("rarity", "common"),
+        "level": 0
+    }
+
+    if "damage" in base:
+        item["damage"] = base["damage"]
+
+    if "defense" in base:
+        item["defense"] = base["defense"]
+
+    if "heal" in base:
+        item["heal"] = base["heal"]
+
+    item["price"] = base.get("price", 5)
+
+    return item
+
+
+def item_display(item):
+    rarity = item.get("rarity", "common")
+    emoji = RARITY_EMOJI.get(rarity, "⚪")
+    name = item.get("name", "Невідомий предмет")
+    level = item.get("level", 0)
+
+    upgrade = f" +{level}" if level > 0 else ""
+    return f"{emoji} {name}{upgrade}"
+
+
+def item_stat_text(item):
+    item_type = item.get("type")
+
+    if item_type == "weapon":
+        return f"+{get_item_damage(item)} урону"
+
+    if item_type == "armor":
+        return f"+{get_item_defense(item)} захисту"
+
+    if item_type == "consumable":
+        return f"+{item.get('heal', 0)} HP"
+
+    return "матеріал"
+
+
+def item_sell_price(item):
+    base = item.get("price", 5)
+    level = item.get("level", 0)
+    return max(1, (base + level * 10) // 2)
+
+
+def upgrade_cost(item):
+    return 20 + item.get("level", 0) * 25
+
+
+def get_item_damage(item):
+    return item.get("damage", 0) + item.get("level", 0) * 2
+
+
+def get_item_defense(item):
+    return item.get("defense", 0) + item.get("level", 0)
+
+
 def default_player():
     return {
         "hp": 100,
@@ -133,7 +298,12 @@ def normalize_player(player):
 
     for key, value in defaults.items():
         if key not in player:
-            player[key] = value.copy() if isinstance(value, (dict, list)) else value
+            if isinstance(value, dict):
+                player[key] = copy.deepcopy(value)
+            elif isinstance(value, list):
+                player[key] = []
+            else:
+                player[key] = value
 
     if not isinstance(player.get("equipment"), dict):
         player["equipment"] = {"weapon": None, "armor": None}
@@ -144,13 +314,67 @@ def normalize_player(player):
     if "armor" not in player["equipment"]:
         player["equipment"]["armor"] = None
 
-    if not isinstance(player.get("inventory"), list):
-        player["inventory"] = []
-
     if player.get("current_location") not in LOCATIONS:
         player["current_location"] = "forest"
 
+    old_inventory = player.get("inventory", [])
+    new_inventory = []
+
+    for item in old_inventory:
+        if isinstance(item, str):
+            new_inventory.append(make_item(item))
+        elif isinstance(item, dict):
+            name = item.get("name")
+            if name:
+                fixed = make_item(name)
+                fixed.update(item)
+                new_inventory.append(fixed)
+
+    player["inventory"] = new_inventory
+
+    for slot in ["weapon", "armor"]:
+        equipped = player["equipment"].get(slot)
+
+        if isinstance(equipped, str):
+            player["equipment"][slot] = make_item(equipped)
+
+        elif isinstance(equipped, dict):
+            name = equipped.get("name")
+            if name:
+                fixed = make_item(name)
+                fixed.update(equipped)
+                player["equipment"][slot] = fixed
+            else:
+                player["equipment"][slot] = None
+
+        else:
+            player["equipment"][slot] = None
+
+    player["inventory"] = remove_equipped_duplicates(player)
+
     return player
+
+
+def remove_equipped_duplicates(player):
+    weapon = player["equipment"].get("weapon")
+    armor = player["equipment"].get("armor")
+    cleaned = []
+
+    weapon_removed = False
+    armor_removed = False
+
+    for item in player["inventory"]:
+        if weapon and item.get("name") == weapon.get("name") and item.get("type") == "weapon" and not weapon_removed:
+            weapon_removed = True
+            continue
+
+        if armor and item.get("name") == armor.get("name") and item.get("type") == "armor" and not armor_removed:
+            armor_removed = True
+            continue
+
+        cleaned.append(item)
+
+    return cleaned
 
 
 def save_players():
@@ -232,8 +456,13 @@ def get_main_menu(current_section=None):
     if row3:
         buttons.append(row3)
 
+    row4 = []
+    if current_section != "upgrade":
+        row4.append("🔨 Покращення")
     if current_section != "update":
-        buttons.append(["📢 Останнє оновлення"])
+        row4.append("📢 Останнє оновлення")
+    if row4:
+        buttons.append(row4)
 
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
@@ -257,6 +486,23 @@ shop_menu = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
+equipment_menu = ReplyKeyboardMarkup(
+    [
+        ["⚔️ Одягнути зброю", "🛡️ Одягнути броню"],
+        ["🧪 Використати зілля"],
+        ["⬅️ Назад"]
+    ],
+    resize_keyboard=True
+)
+
+upgrade_menu = ReplyKeyboardMarkup(
+    [
+        ["🔨 Покращити зброю", "🔨 Покращити броню"],
+        ["⬅️ Назад"]
+    ],
+    resize_keyboard=True
+)
+
 
 def get_player(user_id):
     user_id = str(user_id)
@@ -271,13 +517,17 @@ def get_player(user_id):
 
 
 def get_weapon_bonus(player):
-    weapon = player["equipment"]["weapon"]
-    return WEAPONS.get(weapon, 0) if weapon else 0
+    weapon = player["equipment"].get("weapon")
+    if not weapon:
+        return 0
+    return get_item_damage(weapon)
 
 
 def get_armor_bonus(player):
-    armor = player["equipment"]["armor"]
-    return ARMORS.get(armor, 0) if armor else 0
+    armor = player["equipment"].get("armor")
+    if not armor:
+        return 0
+    return get_item_defense(armor)
 
 
 def get_total_damage_range(player):
@@ -287,26 +537,6 @@ def get_total_damage_range(player):
 
 def get_current_location_data(player):
     return LOCATIONS[player["current_location"]]
-
-
-def auto_equip(player):
-    messages = []
-
-    if player["equipment"]["weapon"] is None:
-        for item in player["inventory"]:
-            if item in WEAPONS:
-                player["equipment"]["weapon"] = item
-                messages.append(f"⚔️ Автоматично екіпіровано зброю: {item}")
-                break
-
-    if player["equipment"]["armor"] is None:
-        for item in player["inventory"]:
-            if item in ARMORS:
-                player["equipment"]["armor"] = item
-                messages.append(f"🛡️ Автоматично екіпіровано броню: {item}")
-                break
-
-    return messages
 
 
 def check_level_up(player):
@@ -331,22 +561,118 @@ def roll_loot(enemy_name, location_key):
     if random.random() > 0.6:
         return None
 
-    return random.choice(enemy_data["drops"])
+    return make_item(random.choice(enemy_data["drops"]))
+
+
+def find_best_item(player, item_type):
+    candidates = [item for item in player["inventory"] if item.get("type") == item_type]
+
+    if not candidates:
+        return None
+
+    if item_type == "weapon":
+        return max(candidates, key=get_item_damage)
+
+    if item_type == "armor":
+        return max(candidates, key=get_item_defense)
+
+    return None
+
+
+def equip_best_item(player, item_type):
+    best_item = find_best_item(player, item_type)
+
+    if not best_item:
+        return None
+
+    player["inventory"].remove(best_item)
+
+    slot = "weapon" if item_type == "weapon" else "armor"
+    old_item = player["equipment"].get(slot)
+
+    if old_item:
+        player["inventory"].append(old_item)
+
+    player["equipment"][slot] = best_item
+    save_players()
+
+    return best_item
+
+
+def auto_equip_if_better(player, item):
+    item_type = item.get("type")
+
+    if item_type not in ["weapon", "armor"]:
+        return []
+
+    slot = "weapon" if item_type == "weapon" else "armor"
+    current = player["equipment"].get(slot)
+
+    if item_type == "weapon":
+        new_power = get_item_damage(item)
+        old_power = get_item_damage(current) if current else 0
+    else:
+        new_power = get_item_defense(item)
+        old_power = get_item_defense(current) if current else 0
+
+    if new_power <= old_power:
+        return []
+
+    player["inventory"].remove(item)
+
+    if current:
+        player["inventory"].append(current)
+
+    player["equipment"][slot] = item
+
+    if item_type == "weapon":
+        return [f"⚔️ Автоматично одягнуто кращу зброю: {item_display(item)}"]
+    return [f"🛡️ Автоматично одягнуто кращу броню: {item_display(item)}"]
+
+
+def use_healing_potion(player):
+    for item in player["inventory"]:
+        if item.get("name") == "Зілля лікування":
+            if player["hp"] >= player["max_hp"]:
+                return "full"
+
+            heal = item.get("heal", 40)
+            player["inventory"].remove(item)
+            player["hp"] = min(player["max_hp"], player["hp"] + heal)
+            save_players()
+            return heal
+
+    return None
 
 
 def sell_first_non_equipped_item(player):
-    weapon = player["equipment"]["weapon"]
-    armor = player["equipment"]["armor"]
+    if not player["inventory"]:
+        return None, 0
 
-    for item in player["inventory"]:
-        if item != weapon and item != armor:
-            player["inventory"].remove(item)
-            price = max(1, ITEM_PRICES.get(item, 10) // 2)
-            player["gold"] += price
-            save_players()
-            return item, price
+    item = player["inventory"].pop(0)
+    price = item_sell_price(item)
+    player["gold"] += price
+    save_players()
 
-    return None, 0
+    return item, price
+
+
+def upgrade_equipped_item(player, slot):
+    item = player["equipment"].get(slot)
+
+    if not item:
+        return "no_item"
+
+    cost = upgrade_cost(item)
+
+    if player["gold"] < cost:
+        return "no_gold"
+
+    player["gold"] -= cost
+    item["level"] = item.get("level", 0) + 1
+    save_players()
+
+    return cost
 
 
 async def send_enemy_intro(update, enemy):
@@ -454,11 +780,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def show_character(update, player):
-    weapon = player["equipment"]["weapon"] or "Немає"
-    armor = player["equipment"]["armor"] or "Немає"
+    weapon = player["equipment"].get("weapon")
+    armor = player["equipment"].get("armor")
     min_dmg, max_dmg = get_total_damage_range(player)
     defense = get_armor_bonus(player)
     location = get_current_location_data(player)["name"]
+
+    weapon_text = item_display(weapon) if weapon else "Немає"
+    armor_text = item_display(armor) if armor else "Немає"
 
     await update.message.reply_text(
         f"🧍 Персонаж\n"
@@ -467,9 +796,9 @@ async def show_character(update, player):
         f"✨ XP: {player['xp']}\n"
         f"💰 Золото: {player['gold']}\n"
         f"📍 Локація: {location}\n"
-        f"🎒 Предметів: {len(player['inventory'])}\n"
-        f"⚔️ Зброя: {weapon}\n"
-        f"🛡️ Броня: {armor}\n"
+        f"🎒 Предметів у сумці: {len(player['inventory'])}\n"
+        f"⚔️ Зброя: {weapon_text}\n"
+        f"🛡️ Броня: {armor_text}\n"
         f"🗡️ Урон: {min_dmg}-{max_dmg}\n"
         f"🧱 Захист: {defense}",
         reply_markup=get_main_menu("character")
@@ -489,25 +818,31 @@ async def show_world(update, player):
 
 
 async def show_inventory(update, player):
-    if not player["inventory"]:
-        await update.message.reply_text(
-            "🎒 Інвентар порожній.",
-            reply_markup=get_main_menu("inventory")
-        )
-        return
-
     lines = ["🎒 Твій інвентар:"]
 
-    for index, item in enumerate(player["inventory"], start=1):
-        marker = ""
+    weapon = player["equipment"].get("weapon")
+    armor = player["equipment"].get("armor")
 
-        if item == player["equipment"]["weapon"]:
-            marker = " [⚔️ екіпіровано]"
-        elif item == player["equipment"]["armor"]:
-            marker = " [🛡️ екіпіровано]"
+    lines.append("")
+    lines.append("⚔️ Одягнута зброя:")
+    lines.append(f"• {item_display(weapon)} — {item_stat_text(weapon)}" if weapon else "• Немає")
 
-        price = ITEM_PRICES.get(item, 0)
-        lines.append(f"{index}. {item}{marker} — {price} зол.")
+    lines.append("")
+    lines.append("🛡️ Одягнута броня:")
+    lines.append(f"• {item_display(armor)} — {item_stat_text(armor)}" if armor else "• Немає")
+
+    lines.append("")
+    lines.append("🎒 Сумка:")
+
+    if not player["inventory"]:
+        lines.append("• Порожньо")
+    else:
+        for index, item in enumerate(player["inventory"], start=1):
+            rarity = RARITY_NAME.get(item.get("rarity", "common"), "звичайний")
+            lines.append(
+                f"{index}. {item_display(item)} — {item_stat_text(item)} — "
+                f"{rarity} — продаж {item_sell_price(item)} зол."
+            )
 
     await update.message.reply_text(
         "\n".join(lines),
@@ -516,28 +851,32 @@ async def show_inventory(update, player):
 
 
 async def show_equipment(update, player):
-    weapon = player["equipment"]["weapon"]
-    armor = player["equipment"]["armor"]
+    weapon = player["equipment"].get("weapon")
+    armor = player["equipment"].get("armor")
 
     weapon_text = "Немає"
     armor_text = "Немає"
 
     if weapon:
-        weapon_text = f"{weapon} (+{get_weapon_bonus(player)} урону)"
+        weapon_text = f"{item_display(weapon)} — {item_stat_text(weapon)}"
 
     if armor:
-        armor_text = f"{armor} (-{get_armor_bonus(player)} урону)"
+        armor_text = f"{item_display(armor)} — {item_stat_text(armor)}"
 
     min_dmg, max_dmg = get_total_damage_range(player)
     defense = get_armor_bonus(player)
 
     await update.message.reply_text(
-        f"🛡️ Екіпіровка\n"
+        f"🛡️ Екіпіровка\n\n"
         f"⚔️ Зброя: {weapon_text}\n"
-        f"🛡️ Броня: {armor_text}\n"
+        f"🛡️ Броня: {armor_text}\n\n"
         f"🗡️ Підсумковий урон: {min_dmg}-{max_dmg}\n"
-        f"🧱 Підсумковий захист: {defense}",
-        reply_markup=get_main_menu("equipment")
+        f"🧱 Підсумковий захист: {defense}\n\n"
+        f"Кнопки:\n"
+        f"⚔️ Одягнути зброю — одягне найкращу зброю із сумки\n"
+        f"🛡️ Одягнути броню — одягне найкращу броню із сумки\n"
+        f"🧪 Використати зілля — відновить HP",
+        reply_markup=equipment_menu
     )
 
 
@@ -546,10 +885,38 @@ async def show_shop(update, player):
         f"🏪 Магазин\n"
         f"💰 Твоє золото: {player['gold']}\n\n"
         f"🛒 Купити зілля — 15 зол.\n"
-        f"🛒 Купити меч (Залізний меч) — 70 зол.\n"
-        f"🛒 Купити броню (Шкіряна броня) — 45 зол.\n"
-        f"💰 Продати предмет — продає перший неекіпірований предмет за пів ціни",
+        f"🛒 Купити меч — Залізний меч, 70 зол.\n"
+        f"🛒 Купити броню — Шкіряна броня, 45 зол.\n"
+        f"💰 Продати предмет — продає перший предмет із сумки",
         reply_markup=shop_menu
+    )
+
+
+async def show_upgrade(update, player):
+    weapon = player["equipment"].get("weapon")
+    armor = player["equipment"].get("armor")
+
+    weapon_text = "Немає"
+    armor_text = "Немає"
+
+    if weapon:
+        weapon_text = (
+            f"{item_display(weapon)} — {item_stat_text(weapon)} — "
+            f"ціна покращення {upgrade_cost(weapon)} зол."
+        )
+
+    if armor:
+        armor_text = (
+            f"{item_display(armor)} — {item_stat_text(armor)} — "
+            f"ціна покращення {upgrade_cost(armor)} зол."
+        )
+
+    await update.message.reply_text(
+        f"🔨 Покращення\n"
+        f"💰 Золото: {player['gold']}\n\n"
+        f"⚔️ Зброя: {weapon_text}\n"
+        f"🛡️ Броня: {armor_text}",
+        reply_markup=upgrade_menu
     )
 
 
@@ -607,6 +974,53 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "🛡️ Екіпіровка":
         await show_equipment(update, player)
 
+    elif text == "🔨 Покращення":
+        await show_upgrade(update, player)
+
+    elif text == "⚔️ Одягнути зброю":
+        item = equip_best_item(player, "weapon")
+        if not item:
+            await update.message.reply_text("⚔️ У сумці немає зброї.", reply_markup=equipment_menu)
+            return
+        await update.message.reply_text(f"✅ Одягнуто зброю: {item_display(item)}", reply_markup=equipment_menu)
+
+    elif text == "🛡️ Одягнути броню":
+        item = equip_best_item(player, "armor")
+        if not item:
+            await update.message.reply_text("🛡️ У сумці немає броні.", reply_markup=equipment_menu)
+            return
+        await update.message.reply_text(f"✅ Одягнуто броню: {item_display(item)}", reply_markup=equipment_menu)
+
+    elif text == "🧪 Використати зілля":
+        result = use_healing_potion(player)
+
+        if result == "full":
+            await update.message.reply_text("❤️ HP вже повне.", reply_markup=equipment_menu)
+        elif result is None:
+            await update.message.reply_text("🧪 У тебе немає зілля.", reply_markup=equipment_menu)
+        else:
+            await update.message.reply_text(f"🧪 Ти використав зілля.\n❤️ +{result} HP", reply_markup=equipment_menu)
+
+    elif text == "🔨 Покращити зброю":
+        result = upgrade_equipped_item(player, "weapon")
+
+        if result == "no_item":
+            await update.message.reply_text("⚔️ Немає зброї для покращення.", reply_markup=upgrade_menu)
+        elif result == "no_gold":
+            await update.message.reply_text("⛔ Недостатньо золота.", reply_markup=upgrade_menu)
+        else:
+            await update.message.reply_text(f"🔨 Зброю покращено!\n💰 Витрачено: {result} зол.", reply_markup=upgrade_menu)
+
+    elif text == "🔨 Покращити броню":
+        result = upgrade_equipped_item(player, "armor")
+
+        if result == "no_item":
+            await update.message.reply_text("🛡️ Немає броні для покращення.", reply_markup=upgrade_menu)
+        elif result == "no_gold":
+            await update.message.reply_text("⛔ Недостатньо золота.", reply_markup=upgrade_menu)
+        else:
+            await update.message.reply_text(f"🔨 Броню покращено!\n💰 Витрачено: {result} зол.", reply_markup=upgrade_menu)
+
     elif text == "🏪 Магазин":
         await show_shop(update, player)
 
@@ -614,46 +1028,41 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_latest_update(update)
 
     elif text == "🛒 Купити зілля":
-        price = ITEM_PRICES["Зілля лікування"]
+        item = make_item("Зілля лікування")
+        price = item["price"]
 
         if player["gold"] < price:
             await update.message.reply_text("⛔ Недостатньо золота.", reply_markup=shop_menu)
             return
 
         player["gold"] -= price
-        player["inventory"].append("Зілля лікування")
+        player["inventory"].append(item)
         save_players()
         await update.message.reply_text("✅ Куплено: Зілля лікування", reply_markup=shop_menu)
 
     elif text == "🛒 Купити меч":
-        price = ITEM_PRICES["Залізний меч"]
+        item = make_item("Залізний меч")
+        price = item["price"]
 
         if player["gold"] < price:
             await update.message.reply_text("⛔ Недостатньо золота.", reply_markup=shop_menu)
             return
 
         player["gold"] -= price
-        player["inventory"].append("Залізний меч")
-
-        if player["equipment"]["weapon"] is None:
-            player["equipment"]["weapon"] = "Залізний меч"
-
+        player["inventory"].append(item)
         save_players()
         await update.message.reply_text("✅ Куплено: Залізний меч", reply_markup=shop_menu)
 
     elif text == "🛒 Купити броню":
-        price = ITEM_PRICES["Шкіряна броня"]
+        item = make_item("Шкіряна броня")
+        price = item["price"]
 
         if player["gold"] < price:
             await update.message.reply_text("⛔ Недостатньо золота.", reply_markup=shop_menu)
             return
 
         player["gold"] -= price
-        player["inventory"].append("Шкіряна броня")
-
-        if player["equipment"]["armor"] is None:
-            player["equipment"]["armor"] = "Шкіряна броня"
-
+        player["inventory"].append(item)
         save_players()
         await update.message.reply_text("✅ Куплено: Шкіряна броня", reply_markup=shop_menu)
 
@@ -661,14 +1070,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         item, price = sell_first_non_equipped_item(player)
 
         if not item:
-            await update.message.reply_text(
-                "⛔ Немає предмета для продажу.",
-                reply_markup=shop_menu
-            )
+            await update.message.reply_text("⛔ У сумці немає предметів для продажу.", reply_markup=shop_menu)
             return
 
         await update.message.reply_text(
-            f"💰 Продано: {item}\n+{price} золота",
+            f"💰 Продано: {item_display(item)}\n+{price} золота",
             reply_markup=shop_menu
         )
 
@@ -691,7 +1097,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         location_key = player["current_location"]
         location = get_current_location_data(player)
-        enemy = random.choice(location["enemies"]).copy()
+        enemy = copy.deepcopy(random.choice(location["enemies"]))
         enemy["location_key"] = location_key
 
         player["enemy"] = enemy
@@ -744,8 +1150,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             if loot:
                 player["inventory"].append(loot)
-                log.append(f"🎁 Знайдено предмет: {loot}")
-                log.extend(auto_equip(player))
+                log.append(f"🎁 Знайдено предмет: {item_display(loot)}")
+                log.extend(auto_equip_if_better(player, loot))
             else:
                 log.append("📦 Цього разу предмет не випав")
 
